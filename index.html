@@ -140,6 +140,35 @@ footer{max-width:980px;margin:0 auto 40px;padding:0 16px;color:var(--muted);font
 .label-status.good{color:var(--green);}
 .label-status.partial{color:#a5433f;}
 @media (max-width:700px){ .figure-col{width:100%;} .figwrap{width:100%;} }
+
+/* ---------- eliminate (strike out) an answer choice ---------- */
+.opt-wrap{position:relative;}
+.opt-wrap .option{padding-right:46px;}
+.strike-btn{position:absolute;right:9px;top:50%;transform:translateY(-50%);
+  width:30px;height:30px;padding:0;border-radius:50%;background:#fff;border:1px solid var(--line);
+  color:var(--muted);font-size:14px;font-weight:800;line-height:1;display:flex;align-items:center;
+  justify-content:center;cursor:pointer;opacity:.5;transition:opacity .12s, background .12s, border-color .12s;}
+.strike-btn:hover{opacity:1;background:#f6cfcf;border-color:var(--red);color:#8d2f2f;}
+.strike-btn.on{opacity:1;background:#f6cfcf;border-color:var(--red);color:#8d2f2f;}
+.option.struck{text-decoration:line-through;text-decoration-thickness:2px;text-decoration-color:var(--red);
+  opacity:.45;background:#eef1f4;border-color:#c8d2da;font-weight:400;}
+.option.struck:hover{opacity:.7;background:#e7ebef;border-color:#b7c6d2;}
+/* once the question is answered the eliminations stay visible but stop being editable */
+.q.answered .strike-btn{display:none;}
+.q.answered .opt-wrap .option{padding-right:13px;}
+.q.answered .option.struck{opacity:.6;}
+.undo-strikes{background:#fff;color:var(--navy);border:1px solid var(--line);}
+.undo-strikes:hover{background:#eef3f7;}
+
+/* ---------- retry a filtered subset ---------- */
+.retry-btn{background:var(--purple);color:#fff;}
+.retry-btn:hover{background:#584a86;}
+.filter-btn.retry{border-color:#c3b9dd;color:#4b3f77;}
+.filter-btn.retry.active{background:var(--purple);border-color:var(--purple);color:#fff;}
+.retry-note{background:#f1eefa;border:1px solid #d5cce9;color:#4b3f77;border-radius:10px;
+  padding:9px 13px;margin:10px 0 0;font-size:13.3px;display:none;align-items:center;
+  justify-content:space-between;gap:10px;flex-wrap:wrap;}
+.retry-note button{padding:5px 11px;font-size:12.5px;}
 </style>
 </head>
 <body>
@@ -147,7 +176,7 @@ footer{max-width:980px;margin:0 auto 40px;padding:0 16px;color:var(--muted);font
   <div class="inner">
     <div class="subtitle">Comprehensive Practice Quiz</div>
     <h1>Anatomy Comprehensive Quiz</h1>
-    <p>A self-paced review covering 14 Quizlet study guides and 12 DMD 5240 lecture decks: gross anatomy, skeletal and muscular systems, nervous system, and the cardiovascular, lymphatic, digestive, urinary and reproductive systems — including drag-and-match diagram labeling for the axial skeleton and axial muscles. Your progress (answers and flags) is automatically saved in this browser. Select an answer to get immediate feedback with the correct answer and explanation.</p>
+    <p>A self-paced review covering 14 Quizlet study guides and 12 DMD 5240 lecture decks: gross anatomy, skeletal and muscular systems, nervous system, and the cardiovascular, lymphatic, digestive, urinary and reproductive systems — including drag-and-match diagram labeling for the axial skeleton and axial muscles. Your progress (answers and flags) is automatically saved in this browser. Use the ✕ beside a choice to eliminate it, then select an answer for immediate feedback. Filter to Incorrect or Flagged and hit Reset &amp; retry to work through just those.</p>
   </div>
 </header>
 
@@ -166,6 +195,7 @@ footer{max-width:980px;margin:0 auto 40px;padding:0 16px;color:var(--muted);font
       <button class="ghost" onclick="resetQuiz()">Reset Answers</button>
       <button class="ghost" onclick="shuffleQuiz()">Shuffle</button>
       <button class="ghost" onclick="showAnswers()">Show All Answers</button>
+      <button class="retry-btn" id="retryBtn" style="display:none" onclick="retryVisible()"></button>
       <button class="save" onclick="saveAndShowStatus()">💾 Save Progress</button>
       <button class="danger" onclick="clearAllData()">Clear Saved Data</button>
       <span class="save-status" id="saveStatus"></span>
@@ -185,6 +215,12 @@ footer{max-width:980px;margin:0 auto 40px;padding:0 16px;color:var(--muted);font
     <button class="filter-btn active" id="filter-all" onclick="setStatus('all')">All Questions</button>
     <button class="filter-btn" id="filter-incorrect" onclick="setStatus('incorrect')">Incorrect Only</button>
     <button class="filter-btn" id="filter-flagged" onclick="setStatus('flagged')">Flagged Only</button>
+    <button class="filter-btn retry" id="filter-retry" style="display:none" onclick="setStatus('retry')">Retry Set</button>
+  </div>
+
+  <div class="retry-note" id="retryNote">
+    <span id="retryNoteText"></span>
+    <button class="ghost" onclick="exitRetry()">Done - show all questions</button>
   </div>
 
   <div id="quizContainer"></div>
@@ -208,6 +244,7 @@ let questions = ALL_QUESTIONS.map((q, i) => ({
   extras: (q.extras || []).slice(),
   figw: q.figw || 330,
   placed: {},
+  struck: [],
   chipOrder: null,
   userPlaced: false,
   selected: null,
@@ -232,13 +269,16 @@ function loadProgress(){
       const saved = data.questions.find(sq => sq.id === q.id);
       if(saved){
         q.selected = saved.selected; q.flagged = saved.flagged; q.revealed = saved.revealed;
+        if(saved.struck) q.struck = saved.struck;
         if(saved.placed) q.placed = saved.placed;
         if(saved.chipOrder) q.chipOrder = saved.chipOrder;
         if(saved.userPlaced) q.userPlaced = saved.userPlaced;
       }
     });
     if(data.selectedModules) selectedModules = new Set(data.selectedModules);
+    if(Array.isArray(data.retrySet)) retrySet = data.retrySet;
     if(data.statusMode) statusMode = data.statusMode;
+    if(statusMode === 'retry' && !retrySet.length) statusMode = 'all';
     const banner = document.getElementById('saveBanner');
     const text = document.getElementById('saveBannerText');
     const ago = getTimeAgo(new Date(data.savedAt));
@@ -251,11 +291,13 @@ function saveProgress(){
   try {
     const payload = {
       questions: questions.map(q => ({ id: q.id, selected: q.selected, flagged: q.flagged, revealed: q.revealed,
+        struck: (q.type !== 'label' && q.struck && q.struck.length) ? q.struck : undefined,
         placed: q.type === 'label' ? q.placed : undefined,
         chipOrder: q.type === 'label' ? q.chipOrder : undefined,
         userPlaced: q.type === 'label' ? q.userPlaced : undefined })),
       selectedModules: Array.from(selectedModules),
       statusMode: statusMode,
+      retrySet: retrySet,
       savedAt: new Date().toISOString()
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -285,8 +327,9 @@ function clearAllData(){
     return;
   }
   clearArmed = false;
+  retrySet = [];
   try { localStorage.removeItem(STORAGE_KEY); } catch(e){}
-  questions.forEach(q => { q.selected = null; q.flagged = false; q.revealed = false;
+  questions.forEach(q => { q.selected = null; q.flagged = false; q.revealed = false; q.struck = [];
     if (isLabel(q)){ q.placed = {}; q.userPlaced = false; q.chipOrder = null; } });
   selectedModules = new Set(questions.map(q => q.section));
   statusMode = 'all';
@@ -334,6 +377,7 @@ function selectNoneModules(){
 
 function passesFilter(q){
   if (!selectedModules.has(q.section)) return false;
+  if (statusMode === 'retry') return retrySet.indexOf(q.id) !== -1;
   if (statusMode === 'incorrect'){
     if (isLabel(q)) return labelIsComplete(q) && !labelIsCorrect(q);
     return q.selected != null && q.selected !== q.ans;
@@ -360,7 +404,10 @@ function renderQuiz(){
     } else {
       let optionsHTML = '';
       q.opts.forEach((opt, o) => {
-        optionsHTML += `<button class="option" id="opt${idx}_${o}" onclick="selectOption(${idx}, ${o})"><strong>${String.fromCharCode(65+o)}:</strong> ${opt}</button>`;
+        optionsHTML += `<div class="opt-wrap">`
+          + `<button class="option" id="opt${idx}_${o}" onclick="selectOption(${idx}, ${o})"><strong>${String.fromCharCode(65+o)}:</strong> ${opt}</button>`
+          + `<button class="strike-btn" id="strk${idx}_${o}" aria-pressed="false" aria-label="Eliminate answer ${String.fromCharCode(65+o)}" title="Eliminate this answer" onclick="toggleStrike(${idx}, ${o})">&#10005;</button>`
+          + `</div>`;
       });
       bodyHTML = `<div class="options">${optionsHTML}</div>`;
     }
@@ -378,6 +425,7 @@ function renderQuiz(){
       ${bodyHTML}
       <div class="q-actions">
         <button class="ghost" onclick="revealAnswer(${idx})">Show Answer</button>
+        ${isLabel(q) ? '' : `<button class="undo-strikes" id="undo${idx}" style="display:none" onclick="clearStrikes(${idx})">Undo eliminations</button>`}
       </div>
       <div class="explain" id="exp${idx}"><strong>Explanation:</strong> ${q.exp}</div>`;
     container.appendChild(qDiv);
@@ -417,9 +465,13 @@ function applyAnswerVisuals(qIdx){
     const c = document.getElementById(`opt${qIdx}_${q.ans}`); if(c) c.classList.add('correct');
     document.getElementById(`exp${qIdx}`).style.display = 'block';
   }
+  const answered = (q.selected !== null && q.selected !== undefined);
+  if (qDiv) qDiv.classList.toggle('answered', answered);
+  applyStrikeVisuals(qIdx);
 }
 
 function selectOption(qIdx, optIdx){
+  if (isStruck(questions[qIdx], optIdx)){ toggleStrike(qIdx, optIdx); return; }
   questions[qIdx].selected = optIdx;
   applyAnswerVisuals(qIdx);
   updateScore();
@@ -456,7 +508,10 @@ function toggleFlag(qIdx){
 
 function setStatus(mode){
   statusMode = mode;
-  ['all','incorrect','flagged'].forEach(m => document.getElementById('filter-'+m).classList.toggle('active', m===mode));
+  ['all','incorrect','flagged','retry'].forEach(m => {
+    const el = document.getElementById('filter-'+m);
+    if (el) el.classList.toggle('active', m===mode);
+  });
   renderQuiz();
   autoSave();
   window.scrollTo({top:0,behavior:'smooth'});
@@ -498,6 +553,7 @@ function updateCounts(){
   const shown = questions.filter(passesFilter).length;
   document.getElementById('filterCount').textContent =
     `Showing ${shown} of ${questions.length} questions across ${selectedModules.size} topic${selectedModules.size===1?'':'s'}  •  🚩 ${flagged} flagged  •  ✗ ${incorrect} incorrect`;
+  updateRetryControls();
 }
 
 function showAnswers(){
@@ -516,8 +572,10 @@ function showAnswers(){
 }
 
 function resetQuiz(){
+  retrySet = [];
+  if (statusMode === 'retry') statusMode = 'all';
   questions.forEach(q => {
-    q.selected = null; q.revealed = false;
+    q.selected = null; q.revealed = false; q.struck = [];
     if (isLabel(q)){ q.placed = {}; q.userPlaced = false; q.chipOrder = null; }
   });
   updateScore();
@@ -528,6 +586,8 @@ function resetQuiz(){
 }
 
 function shuffleQuiz(){
+  retrySet = [];                       // ids are reassigned below, so the old set no longer maps
+  if (statusMode === 'retry') statusMode = 'all';
   // Shuffle the questions array order
   for (let i=questions.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [questions[i],questions[j]]=[questions[j],questions[i]]; }
   // Reassign question IDs to match new positions (CRITICAL: prevents answer misalignment)
@@ -544,6 +604,7 @@ function shuffleQuiz(){
     for (let i=opts.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [opts[i],opts[j]]=[opts[j],opts[i]]; }
     q.ans = opts.indexOf(correctVal);
     q.selected = null; q.revealed = false;
+    q.struck = [];          // option order changed, so old eliminations no longer apply
   });
   updateScore();
   renderQuiz();
@@ -804,6 +865,122 @@ document.addEventListener('mouseout', e => {
   if (!z) return;
   document.querySelectorAll('.legend li.lit').forEach(r => r.classList.remove('lit'));
 });
+
+/* ================= eliminate (strike out) answer choices ================= */
+function struckSet(q){ if(!Array.isArray(q.struck)) q.struck = []; return q.struck; }
+function isStruck(q, o){ return struckSet(q).indexOf(o) !== -1; }
+
+function toggleStrike(qIdx, optIdx){
+  const q = questions[qIdx];
+  if (q.selected !== null && q.selected !== undefined) return;   // answered: eliminations are locked in
+  const s = struckSet(q);
+  const at = s.indexOf(optIdx);
+  if (at === -1) s.push(optIdx); else s.splice(at, 1);
+  applyStrikeVisuals(qIdx);
+  autoSave();
+}
+
+function clearStrikes(qIdx){
+  const q = questions[qIdx];
+  if (q.selected !== null && q.selected !== undefined) return;   // locked once answered
+  q.struck = [];
+  applyStrikeVisuals(qIdx);
+  autoSave();
+}
+
+function applyStrikeVisuals(qIdx){
+  const q = questions[qIdx];
+  const qDiv = document.getElementById(`q${qIdx}`);
+  if (!qDiv || isLabel(q)) return;
+  q.opts.forEach((_, o) => {
+    const btn = document.getElementById(`opt${qIdx}_${o}`);
+    const x   = document.getElementById(`strk${qIdx}_${o}`);
+    const on  = isStruck(q, o);
+    if (btn) btn.classList.toggle('struck', on);
+    if (x){
+      x.classList.toggle('on', on);
+      x.setAttribute('aria-pressed', on ? 'true' : 'false');
+      x.title = on ? 'Bring this answer back' : 'Eliminate this answer';
+      x.innerHTML = on ? '&#8630;' : '&#10005;';
+    }
+  });
+  const answered = (q.selected !== null && q.selected !== undefined);
+  const undo = document.getElementById(`undo${qIdx}`);
+  if (undo) undo.style.display = (!answered && struckSet(q).length) ? '' : 'none';
+}
+
+/* ================= retry a filtered subset of questions ================= */
+let retrySet = [];
+
+function hasWork(q){
+  if (isLabel(q)) return Object.keys(q.placed || {}).length > 0 || q.revealed;
+  return (q.selected !== null && q.selected !== undefined) || q.revealed ||
+         (Array.isArray(q.struck) && q.struck.length > 0);
+}
+
+function clearOne(q){
+  q.selected = null; q.revealed = false; q.struck = [];
+  if (isLabel(q)){ q.placed = {}; q.userPlaced = false; }
+}
+
+/* Reset just the questions currently on screen, then keep showing them.
+   Needed because a reset "incorrect" question is no longer incorrect, so it
+   would immediately drop out of the Incorrect Only view. */
+function retryVisible(){
+  const vis = questions.filter(q => passesFilter(q) && hasWork(q));
+  if (!vis.length) return;
+  retrySet = vis.map(q => q.id);
+  const from = statusMode === 'flagged' ? 'flagged' : 'incorrect';
+  vis.forEach(clearOne);
+  statusMode = 'retry';
+  ['all','incorrect','flagged','retry'].forEach(m => {
+    const el = document.getElementById('filter-'+m);
+    if (el) el.classList.toggle('active', m === 'retry');
+  });
+  renderQuiz();
+  const note = document.getElementById('retryNote');
+  if (note){
+    document.getElementById('retryNoteText').textContent =
+      `Retrying ${vis.length} ${from} question${vis.length===1?'':'s'} - answers, eliminations and matches cleared.`;
+    note.style.display = 'flex';
+  }
+  autoSave();
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+
+function exitRetry(){
+  retrySet = [];
+  const note = document.getElementById('retryNote');
+  if (note) note.style.display = 'none';
+  setStatus('all');
+}
+
+function updateRetryControls(){
+  const btn = document.getElementById('retryBtn');
+  if (btn){
+    const scoped = (statusMode === 'incorrect' || statusMode === 'flagged');
+    const n = scoped ? questions.filter(q => passesFilter(q) && hasWork(q)).length : 0;
+    btn.style.display = n ? '' : 'none';
+    btn.textContent = `↻ Reset & retry these ${n}`;
+    btn.title = `Clear your answers on the ${n} question${n===1?'':'s'} shown, and keep them on screen to retry`;
+  }
+  const chip = document.getElementById('filter-retry');
+  if (chip){
+    chip.style.display = retrySet.length ? '' : 'none';
+    chip.textContent = `Retry Set (${retrySet.length})`;
+  }
+  const note = document.getElementById('retryNote');
+  if (note){
+    if (statusMode === 'retry' && retrySet.length){
+      const txt = document.getElementById('retryNoteText');
+      if (txt && !txt.textContent)      // e.g. after a page reload
+        txt.textContent = `Retrying ${retrySet.length} question${retrySet.length===1?'':'s'}.`;
+      note.style.display = 'flex';
+    } else {
+      note.style.display = 'none';
+    }
+  }
+}
 
 loadProgress();
 buildModulePanel();
